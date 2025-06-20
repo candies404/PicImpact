@@ -1,13 +1,10 @@
 import 'server-only'
-import { fetchUserById } from '~/server/db/query'
-import { fetchConfigsByKeys, fetchSecretKey } from '~/server/db/query/configs'
+
+import { fetchConfigsByKeys } from '~/server/db/query/configs'
 import type { Config } from '~/types'
-import { auth } from '~/server/auth'
-import CryptoJS from 'crypto-js'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { updateAListConfig, updateCustomInfo, updateR2Config, updateS3Config } from '~/server/db/operate/configs'
-import { updatePassword, updateUserInfo } from '~/server/db/operate'
 
 const app = new Hono()
 
@@ -39,27 +36,15 @@ app.get('/r2-info', async (c) => {
   const data = await fetchConfigsByKeys([
     'r2_accesskey_id',
     'r2_accesskey_secret',
-    'r2_endpoint',
+    'r2_account_id',
     'r2_bucket',
     'r2_storage_folder',
     'r2_public_domain',
-    'r2_direct_upload',
     'r2_direct_download'
   ])
   return c.json(data)
 })
 
-app.get('/get-user-info', async (c) => {
-  const { user } = await auth()
-  const data = await fetchUserById(user?.id)
-  
-  return c.json({
-    id: data?.id,
-    name: data?.name,
-    email: data?.email,
-    image: data?.image
-  })
-})
 app.get('/s3-info', async (c) => {
   const data = await fetchConfigsByKeys([
     'accesskey_id',
@@ -71,7 +56,6 @@ app.get('/s3-info', async (c) => {
     'force_path_style',
     's3_cdn',
     's3_cdn_url',
-    's3_direct_upload',
     's3_direct_download'
   ])
   return c.json(data)
@@ -92,14 +76,13 @@ app.put('/update-r2-info', async (c) => {
 
   const r2AccesskeyId = query?.find((item: Config) => item.config_key === 'r2_accesskey_id').config_value
   const r2AccesskeySecret = query?.find((item: Config) => item.config_key === 'r2_accesskey_secret').config_value
-  const r2Endpoint = query?.find((item: Config) => item.config_key === 'r2_endpoint').config_value
+  const r2AccountId = query?.find((item: Config) => item.config_key === 'r2_account_id').config_value
   const r2Bucket = query?.find((item: Config) => item.config_key === 'r2_bucket').config_value
   const r2StorageFolder = query?.find((item: Config) => item.config_key === 'r2_storage_folder').config_value
   const r2PublicDomain = query?.find((item: Config) => item.config_key === 'r2_public_domain').config_value
-  const r2DirectUpload = query?.find((item: Config) => item.config_key === 'r2_direct_upload').config_value
   const r2DirectDownload = query?.find((item: Config) => item.config_key === 'r2_direct_download').config_value
 
-  const data = await updateR2Config({ r2AccesskeyId, r2AccesskeySecret, r2Endpoint, r2Bucket, r2StorageFolder, r2PublicDomain, r2DirectUpload, r2DirectDownload })
+  const data = await updateR2Config({ r2AccesskeyId, r2AccesskeySecret, r2AccountId, r2Bucket, r2StorageFolder, r2PublicDomain, r2DirectDownload })
   return c.json(data)
 })
 
@@ -115,10 +98,9 @@ app.put('/update-s3-info', async (c) => {
   const forcePathStyle = query?.find((item: Config) => item.config_key === 'force_path_style').config_value
   const s3Cdn = query?.find((item: Config) => item.config_key === 's3_cdn').config_value
   const s3CdnUrl = query?.find((item: Config) => item.config_key === 's3_cdn_url').config_value
-  const s3DirectUpload = query?.find((item: Config) => item.config_key === 's3_direct_upload').config_value
   const s3DirectDownload = query?.find((item: Config) => item.config_key === 's3_direct_download').config_value
 
-  const data = await updateS3Config({ accesskeyId, accesskeySecret, region, endpoint, bucket, storageFolder, forcePathStyle, s3Cdn, s3CdnUrl, s3DirectUpload, s3DirectDownload })
+  const data = await updateS3Config({ accesskeyId, accesskeySecret, region, endpoint, bucket, storageFolder, forcePathStyle, s3Cdn, s3CdnUrl, s3DirectDownload })
   return c.json(data)
 })
 
@@ -141,61 +123,6 @@ app.put('/update-custom-info', async (c) => {
   }
   try {
     await updateCustomInfo(query)
-    return c.json({
-      code: 200,
-      message: 'Success'
-    })
-  } catch (e) {
-    throw new HTTPException(500, { message: 'Failed', cause: e })
-  }
-})
-
-app.put('/update-password', async (c) => {
-  const { user } = await auth()
-  const pwd = await c.req.json()
-  const daUser = await fetchUserById(user?.id)
-  const secretKey = await fetchSecretKey()
-  if (!secretKey || !secretKey.config_value) {
-    throw new HTTPException(500, { message: 'Failed' })
-  }
-  const hashedOldPassword = CryptoJS.HmacSHA512(pwd.oldPassword, secretKey?.config_value).toString()
-
-  try {
-    if (daUser && hashedOldPassword === daUser.password) {
-      const hashedNewPassword = CryptoJS.HmacSHA512(pwd.newPassword, secretKey?.config_value).toString()
-      await updatePassword(user?.id, hashedNewPassword)
-      return c.json({
-        code: 200,
-        message: 'Success'
-      })
-    } else {
-      return c.json({
-        code: 500,
-        message: 'Old password does not match'
-      })
-    }
-  } catch (e) {
-    throw new HTTPException(500, { message: 'Failed', cause: e })
-  }
-})
-
-app.put('/update-user-info', async (c) => {
-  const { user } = await auth()
-  const { name, email, avatar } = await c.req.json() 
-  try {
-    const updates: {
-      name?: string,
-      email?: string,
-      image?: string
-    } = {}
-    
-    if (name) updates.name = name
-    if (email) updates.email = email
-    if (avatar) updates.image = avatar
-    if (Object.keys(updates).length > 0) {
-      await updateUserInfo(user?.id, updates)
-    }
-    
     return c.json({
       code: 200,
       message: 'Success'
